@@ -14,13 +14,13 @@
 `include "drat_protocol.sv"
 
 module axis_stream_to_pkt_backpressured_unit_test;
+   timeunit 1ns;
+   timeprecision 1ps;
+
    import drat_protocol::*;
    import svunit_pkg::svunit_testcase;
    string name = "axis_stream_to_pkt_ut";
    svunit_testcase svunit_ut;
-
-   timeunit 1ns;
-   timeprecision 1ps;
 
    localparam SIZE_STIM=10;
    localparam SIZE_RESP=11;
@@ -133,6 +133,8 @@ module axis_stream_to_pkt_backpressured_unit_test;
       .flow_id(flow_id), // DRaT Flow ID for this flow (union of src + dst)
       .time_per_pkt(time_per_pkt),
       .burst_size(burst_size),
+      .has_metadata(1'b0),
+      .rx_mimo_metadata(64'd0),
       .abort(abort),
       // Status Flags
       .idle(idle),
