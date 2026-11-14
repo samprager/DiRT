@@ -328,6 +328,10 @@ function automatic logic is_end_of_burst_type (input logic [7:0] packet_type);
 endfunction : is_end_of_burst_type
 
 // Bytes before the first sample: 16 normal, 24 extended, 544 extended2.
+// Warning: INT16_COMPLEX_EXTENDED_ASYNC (0x60) and _ASYNC_EOB (0x70) belong to
+// neither predicate family, so this returns 16 for them, although the
+// existing extended model (DRaTPacketExtended) gives them a 24 byte header.
+// Do not use header_bytes to size 0x60/0x70 packets.
 function automatic logic [15:0] header_bytes (input logic [7:0] packet_type);
    if (is_extended2_type(packet_type)) begin
       return 16'd544;
