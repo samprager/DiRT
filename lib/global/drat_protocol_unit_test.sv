@@ -777,6 +777,219 @@ module drat_protocol_unit_test;
 
     `SVTEST_END
 
+    //=========================================================================
+    // EXTENDED2 packet types and metadata words
+    //=========================================================================
+    // Type predicates: true exactly for each family's codes.
+    //-------------------------------------------------------------------------
+    `SVTEST(ext2_type_predicates)
+        logic [7:0] code;
+        logic [7:0] outside [0:6];
+
+        `FAIL_UNLESS_EQUAL(INT16_COMPLEX_EOBB, 8'h05);
+        `FAIL_UNLESS_EQUAL(INT16_COMPLEX_EXTENDED2, 8'h44);
+        `FAIL_UNLESS_EQUAL(INT16_COMPLEX_EXTENDED2_EOBB, 8'h45);
+        `FAIL_UNLESS_EQUAL(INT16_COMPLEX_EXTENDED2_EOB, 8'h54);
+
+        // Extended family is 0x40/0x50 only.
+        `FAIL_UNLESS_EQUAL(is_extended_type(INT16_COMPLEX_EXTENDED), 1'b1);
+        `FAIL_UNLESS_EQUAL(is_extended_type(INT16_COMPLEX_EXTENDED_EOB), 1'b1);
+        `FAIL_UNLESS_EQUAL(is_extended_type(INT16_COMPLEX_EXTENDED2), 1'b0);
+        `FAIL_UNLESS_EQUAL(is_extended_type(INT16_COMPLEX_EXTENDED2_EOBB), 1'b0);
+        `FAIL_UNLESS_EQUAL(is_extended_type(INT16_COMPLEX_EXTENDED2_EOB), 1'b0);
+        `FAIL_UNLESS_EQUAL(is_extended_type(INT16_COMPLEX_EOBB), 1'b0);
+
+        // Extended2 family is 0x44/0x45/0x54 only.
+        `FAIL_UNLESS_EQUAL(is_extended2_type(INT16_COMPLEX_EXTENDED2), 1'b1);
+        `FAIL_UNLESS_EQUAL(is_extended2_type(INT16_COMPLEX_EXTENDED2_EOBB), 1'b1);
+        `FAIL_UNLESS_EQUAL(is_extended2_type(INT16_COMPLEX_EXTENDED2_EOB), 1'b1);
+        `FAIL_UNLESS_EQUAL(is_extended2_type(INT16_COMPLEX_EXTENDED), 1'b0);
+        `FAIL_UNLESS_EQUAL(is_extended2_type(INT16_COMPLEX_EXTENDED_EOB), 1'b0);
+        `FAIL_UNLESS_EQUAL(is_extended2_type(INT16_COMPLEX_EOBB), 1'b0);
+
+        // End of frame is bit 4; end of burst is 0x05, 0x45, or end of frame.
+        `FAIL_UNLESS_EQUAL(is_end_of_frame_type(INT16_COMPLEX_EOB), 1'b1);
+        `FAIL_UNLESS_EQUAL(is_end_of_frame_type(INT16_COMPLEX_EXTENDED_EOB), 1'b1);
+        `FAIL_UNLESS_EQUAL(is_end_of_frame_type(INT16_COMPLEX_EXTENDED2_EOB), 1'b1);
+        `FAIL_UNLESS_EQUAL(is_end_of_frame_type(INT16_COMPLEX_EOBB), 1'b0);
+        `FAIL_UNLESS_EQUAL(is_end_of_frame_type(INT16_COMPLEX_EXTENDED2_EOBB), 1'b0);
+        `FAIL_UNLESS_EQUAL(is_end_of_frame_type(INT16_COMPLEX_EXTENDED2), 1'b0);
+        `FAIL_UNLESS_EQUAL(is_end_of_burst_type(INT16_COMPLEX_EOBB), 1'b1);
+        `FAIL_UNLESS_EQUAL(is_end_of_burst_type(INT16_COMPLEX_EXTENDED2_EOBB), 1'b1);
+        `FAIL_UNLESS_EQUAL(is_end_of_burst_type(INT16_COMPLEX_EXTENDED2_EOB), 1'b1);
+        `FAIL_UNLESS_EQUAL(is_end_of_burst_type(INT16_COMPLEX_EOB), 1'b1);
+        `FAIL_UNLESS_EQUAL(is_end_of_burst_type(INT16_COMPLEX_EXTENDED_EOB), 1'b1);
+        `FAIL_UNLESS_EQUAL(is_end_of_burst_type(INT16_COMPLEX_EXTENDED2), 1'b0);
+        `FAIL_UNLESS_EQUAL(is_end_of_burst_type(INT16_COMPLEX), 1'b0);
+        `FAIL_UNLESS_EQUAL(is_end_of_burst_type(INT16_COMPLEX_EXTENDED), 1'b0);
+
+        // Neither extended family claims normal, async, Daniel's async
+        // extended, or INT16x16 codes.
+        outside = '{8'h00, 8'h10, 8'h20, 8'h30, 8'h60, 8'h70, 8'h08};
+        foreach (outside[i]) begin
+            `FAIL_UNLESS_EQUAL(is_extended_type(outside[i]), 1'b0);
+            `FAIL_UNLESS_EQUAL(is_extended2_type(outside[i]), 1'b0);
+        end
+
+        // Exhaustive: every 8-bit code against the definitions.
+        for (int c = 0; c < 256; c++) begin
+            code = c[7:0];
+            `FAIL_UNLESS_EQUAL(is_extended_type(code),
+                               (code == 8'h40) || (code == 8'h50));
+            `FAIL_UNLESS_EQUAL(is_extended2_type(code),
+                               (code == 8'h44) || (code == 8'h45) || (code == 8'h54));
+            `FAIL_UNLESS_EQUAL(is_end_of_frame_type(code), code[4]);
+            `FAIL_UNLESS_EQUAL(is_end_of_burst_type(code),
+                               (code == 8'h05) || (code == 8'h45) || code[4]);
+        end
+
+    `SVTEST_END
+
+    //-------------------------------------------------------------------------
+    // Header bytes per family: 16 / 24 / 544
+    //-------------------------------------------------------------------------
+    `SVTEST(ext2_header_bytes)
+        `FAIL_UNLESS_EQUAL(header_bytes(INT16_COMPLEX), 16'd16);
+        `FAIL_UNLESS_EQUAL(header_bytes(INT16_COMPLEX_EOB), 16'd16);
+        `FAIL_UNLESS_EQUAL(header_bytes(INT16_COMPLEX_EOBB), 16'd16);
+        `FAIL_UNLESS_EQUAL(header_bytes(INT16_COMPLEX_EXTENDED), 16'd24);
+        `FAIL_UNLESS_EQUAL(header_bytes(INT16_COMPLEX_EXTENDED_EOB), 16'd24);
+        `FAIL_UNLESS_EQUAL(header_bytes(INT16_COMPLEX_EXTENDED2), 16'd544);
+        `FAIL_UNLESS_EQUAL(header_bytes(INT16_COMPLEX_EXTENDED2_EOBB), 16'd544);
+        `FAIL_UNLESS_EQUAL(header_bytes(INT16_COMPLEX_EXTENDED2_EOB), 16'd544);
+
+        // Consistent with the header structs and the EXTENDED2 layout:
+        // header + timestamp + word 0 + word 1 + 64 block beats.
+        `FAIL_UNLESS_EQUAL(header_bytes(INT16_COMPLEX), 16'($bits(pkt_header_t) / 8));
+        `FAIL_UNLESS_EQUAL(header_bytes(INT16_COMPLEX_EXTENDED),
+                           16'($bits(pkt_header_extended_t) / 8));
+        `FAIL_UNLESS_EQUAL(header_bytes(INT16_COMPLEX_EXTENDED2), 16'((4 + 64) * 8));
+        // First-packet maximum in a 1472-byte packet.
+        `FAIL_UNLESS_EQUAL((1472 - header_bytes(INT16_COMPLEX_EXTENDED2)) / 4, 232);
+
+    `SVTEST_END
+
+    //-------------------------------------------------------------------------
+    // Metadata word 0 field positions
+    //-------------------------------------------------------------------------
+    `SVTEST(meta_word0_roundtrip)
+        drat_meta_word0_t w0;
+        logic [63:0] raw;
+
+        `FAIL_UNLESS_EQUAL($bits(drat_meta_word0_t), 64);
+
+        w0 = '0;
+        w0.frac_delay = 16'hBEEF;
+        w0.phase = 16'h1234;
+        w0.gain8 = 8'h7F;
+        w0.layout = 4'd1;
+        w0.beams_m1 = 2'd3;
+        w0.burst_index = 8'hA5;
+        raw = w0;
+        `FAIL_UNLESS_EQUAL(raw[15:0], 16'hBEEF);
+        `FAIL_UNLESS_EQUAL(raw[31:16], 16'h1234);
+        `FAIL_UNLESS_EQUAL(raw[39:32], 8'h7F);
+        `FAIL_UNLESS_EQUAL(raw[47:40], 8'h00);
+        `FAIL_UNLESS_EQUAL(raw[51:48], 4'd1);
+        `FAIL_UNLESS_EQUAL(raw[53:52], 2'd3);
+        `FAIL_UNLESS_EQUAL(raw[54], 1'b0);
+        `FAIL_UNLESS_EQUAL(raw[55], 1'b0);
+        `FAIL_UNLESS_EQUAL(raw[63:56], 8'hA5);
+
+        // Weight source and estimates valid, one at a time.
+        w0.weight_src = 1'b1;
+        raw = w0;
+        `FAIL_UNLESS_EQUAL(raw[54], 1'b1);
+        `FAIL_UNLESS_EQUAL(raw[55], 1'b0);
+        w0.weight_src = 1'b0;
+        w0.est_valid = 1'b1;
+        raw = w0;
+        `FAIL_UNLESS_EQUAL(raw[54], 1'b0);
+        `FAIL_UNLESS_EQUAL(raw[55], 1'b1);
+
+        // Frequency index, alone.
+        w0 = '0;
+        w0.freq_idx = 8'hC3;
+        raw = w0;
+        `FAIL_UNLESS_EQUAL(raw, 64'h0000_C300_0000_0000);
+
+        // Whole word, and back from bits.
+        w0 = '0;
+        w0.frac_delay = 16'hBEEF;
+        w0.phase = 16'h1234;
+        w0.gain8 = 8'h7F;
+        w0.layout = 4'd1;
+        w0.beams_m1 = 2'd3;
+        w0.weight_src = 1'b1;
+        w0.est_valid = 1'b1;
+        w0.burst_index = 8'hA5;
+        raw = w0;
+        `FAIL_UNLESS_EQUAL(raw, 64'hA5F1_007F_1234_BEEF);
+        w0 = drat_meta_word0_t'(64'hA5F1_C37F_1234_BEEF);
+        `FAIL_UNLESS_EQUAL(w0.frac_delay, 16'hBEEF);
+        `FAIL_UNLESS_EQUAL(w0.phase, 16'h1234);
+        `FAIL_UNLESS_EQUAL(w0.gain8, 8'h7F);
+        `FAIL_UNLESS_EQUAL(w0.freq_idx, 8'hC3);
+        `FAIL_UNLESS_EQUAL(w0.layout, 4'd1);
+        `FAIL_UNLESS_EQUAL(w0.beams_m1, 2'd3);
+        `FAIL_UNLESS_EQUAL(w0.weight_src, 1'b1);
+        `FAIL_UNLESS_EQUAL(w0.est_valid, 1'b1);
+        `FAIL_UNLESS_EQUAL(w0.burst_index, 8'hA5);
+
+    `SVTEST_END
+
+    //-------------------------------------------------------------------------
+    // Metadata word 1 field positions
+    //-------------------------------------------------------------------------
+    `SVTEST(meta_word1_roundtrip)
+        drat_meta_word1_t w1;
+        logic [63:0] raw;
+
+        `FAIL_UNLESS_EQUAL($bits(drat_meta_word1_t), 64);
+
+        // Computed per-burst shifts: distinct per beam, beam 0 in the low bits.
+        w1 = '0;
+        w1.beam_shift[0] = 6'h01;
+        w1.beam_shift[1] = 6'h12;
+        w1.beam_shift[2] = 6'h23;
+        w1.beam_shift[3] = 6'h34;
+        w1.lead_shift = 6'h2A;
+        w1.shift_src = 1'b1;
+        w1.sw_gain_log2 = 12'hABC;
+        raw = w1;
+        `FAIL_UNLESS_EQUAL(raw[5:0], 6'h01);
+        `FAIL_UNLESS_EQUAL(raw[11:6], 6'h12);
+        `FAIL_UNLESS_EQUAL(raw[17:12], 6'h23);
+        `FAIL_UNLESS_EQUAL(raw[23:18], 6'h34);
+        `FAIL_UNLESS_EQUAL(raw[29:24], 6'h2A);
+        `FAIL_UNLESS_EQUAL(raw[30], 1'b1);
+        `FAIL_UNLESS_EQUAL(raw[31], 1'b0);
+        `FAIL_UNLESS_EQUAL(raw[43:32], 12'hABC);
+        `FAIL_UNLESS_EQUAL(raw[63:44], 20'h0);
+        `FAIL_UNLESS_EQUAL(raw, 64'h0000_0ABC_6AD2_3481);
+
+        // Fixed constant shift: source 0, constant carried in bits 5:0.
+        w1 = '0;
+        w1.beam_shift[0] = 6'h0D;
+        w1.lead_shift = 6'h3F;
+        raw = w1;
+        `FAIL_UNLESS_EQUAL(raw[5:0], 6'h0D);
+        `FAIL_UNLESS_EQUAL(raw[29:24], 6'h3F);
+        `FAIL_UNLESS_EQUAL(raw[30], 1'b0);
+        `FAIL_UNLESS_EQUAL(raw, 64'h0000_0000_3F00_000D);
+
+        // Back from bits.
+        w1 = drat_meta_word1_t'(64'h0000_0ABC_6AD2_3481);
+        `FAIL_UNLESS_EQUAL(w1.beam_shift[0], 6'h01);
+        `FAIL_UNLESS_EQUAL(w1.beam_shift[1], 6'h12);
+        `FAIL_UNLESS_EQUAL(w1.beam_shift[2], 6'h23);
+        `FAIL_UNLESS_EQUAL(w1.beam_shift[3], 6'h34);
+        `FAIL_UNLESS_EQUAL(w1.lead_shift, 6'h2A);
+        `FAIL_UNLESS_EQUAL(w1.shift_src, 1'b1);
+        `FAIL_UNLESS_EQUAL(w1.sw_gain_log2, 12'hABC);
+
+    `SVTEST_END
+
     `SVUNIT_TESTS_END
 
 endmodule

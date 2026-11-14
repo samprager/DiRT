@@ -48,6 +48,8 @@ typedef enum logic [7:0]
    INT16_COMPLEX=8'h00,
    // Integer complex numbers in a 16bit format. Marks end of burst.
    INT16_COMPLEX_EOB=8'h10,
+   // Integer complex numbers in a 16bit format. Marks end of a burst that does not end the frame.
+   INT16_COMPLEX_EOBB=8'h05,
    // Integer complex numbers in a 16bit format. Timestamp unused.
    INT16_COMPLEX_ASYNC=8'h20,
    // Integer complex numbers in a 16bit format. Timestamp unused. Marks end of burst.
@@ -60,6 +62,15 @@ typedef enum logic [7:0]
    INT16_COMPLEX_EXTENDED_ASYNC=8'h60,
    // Integer complex numbers in a 16bit format for extended packet type. Timestamp unused. Marks end of burst.
    INT16_COMPLEX_EXTENDED_ASYNC_EOB=8'h70,
+   // Integer complex numbers in a 16bit format for extended2 packet type (metadata words 0 and 1
+   // and a 64 beat block follow the timestamp). First packet of a burst, more packets follow.
+   INT16_COMPLEX_EXTENDED2=8'h44,
+   // Integer complex numbers in a 16bit format for extended2 packet type. Whole burst in one packet.
+   // Marks end of a burst that does not end the frame.
+   INT16_COMPLEX_EXTENDED2_EOBB=8'h45,
+   // Integer complex numbers in a 16bit format for extended2 packet type. Whole burst in one packet.
+   // Marks end of frame (bit 4, as for the other EOB types).
+   INT16_COMPLEX_EXTENDED2_EOB=8'h54,
    // Integer real numbers in a 16bit format. Used for example, for real valued sample data.
    INT16_REAL=8'h01,
    // Integer complex numbers in a 12bit (packed) format. Used for example for IQ sample data.
@@ -244,6 +255,88 @@ typedef payload_beat_t pkt_payload_t [];
 
 // NOTE: Can't build a struct containing a pkt_header_t and pkt_payload_t because
 // its illegal to have packed structs mixed with dynamic arrays.
+
+//-------------------------------------------------------------------------------
+//-- EXTENDED2 packet family: per-burst RX MIMO metadata.
+//--
+//-- Beat layout of an INT16_COMPLEX_EXTENDED2* packet:
+//--   0      header (length = samples*4 + 544)
+//--   1      timestamp of the first sample in this packet
+//--   2      metadata word 0 (drat_meta_word0_t)
+//--   3      metadata word 1 (drat_meta_word1_t)
+//--   4-35   channel estimates, index = beam*8 + antenna
+//--   36-67  channel weights as applied, same index
+//--   68...  samples
+//-- Block beats are one complex value each: {I[31:0], Q[31:0]}, signed.
+//-------------------------------------------------------------------------------
+
+// Metadata word 0. The extended family (0x40/0x50) carries the same word as its
+// rx_mimo_metadata beat with bits 63:32 zero; bits 31:0 are identical in both.
+typedef struct packed
+               {
+                  logic [7:0]  burst_index; // 63:56 burst index within the frame, from 0, wrapping.
+                  logic        est_valid;   // 55    estimates captured before the burst's first packet.
+                  logic        weight_src;  // 54    0 = software weights, 1 = hardware (derived from estimates).
+                  logic [1:0]  beams_m1;    // 53:52 number of beams - 1.
+                  logic [3:0]  layout;      // 51:48 block layout ID: 0 = no block or block invalid,
+                                            //       1 = 4x8 estimates + 4x8 weights, others reserved.
+                  logic [7:0]  freq_idx;    // 47:40 frequency index (reserved, zero).
+                  logic [7:0]  gain8;       // 39:32 gain log2: software gain_log2 saturated to 8 bits; hardware 0.
+                  logic [15:0] phase;       // 31:16 peak phase, Q3.13.
+                  logic [15:0] frac_delay;  // 15:0  fractional delay (peak estimate), Q2.14.
+               } drat_meta_word0_t;
+
+// Metadata word 1: the shift the CI16 converter actually applied, in every mode.
+typedef struct packed
+               {
+                  logic [19:0]     reserved_63_44; // 63:44 reserved, zero.
+                  logic [11:0]     sw_gain_log2;   // 43:32 software gain_log2, full 12 bits.
+                  logic            reserved_31;    // 31    reserved, zero.
+                  logic            shift_src;      // 30    1 = computed per burst, 0 = fixed constant
+                                                   //       (the constant is carried in beam_shift[0]).
+                  logic [5:0]      lead_shift;     // 29:24 lead shift.
+                  logic [3:0][5:0] beam_shift;     // 23:0  per-beam applied right shift, beam 0 in bits 5:0.
+               } drat_meta_word1_t;
+
+//-------------------------------------------------------------------------------
+//-- Packet type classification. Arguments are raw 8-bit codes so header bits can
+//-- be classified without a cast. 0x60/0x70 belong to neither extended family.
+//-------------------------------------------------------------------------------
+function automatic logic is_extended_type (input logic [7:0] packet_type);
+   return (packet_type == INT16_COMPLEX_EXTENDED) ||
+          (packet_type == INT16_COMPLEX_EXTENDED_EOB);
+endfunction : is_extended_type
+
+function automatic logic is_extended2_type (input logic [7:0] packet_type);
+   return (packet_type == INT16_COMPLEX_EXTENDED2) ||
+          (packet_type == INT16_COMPLEX_EXTENDED2_EOBB) ||
+          (packet_type == INT16_COMPLEX_EXTENDED2_EOB);
+endfunction : is_extended2_type
+
+// End of frame: bit 4 of the packet type (the EOB bit).
+/* verilator lint_off UNUSEDSIGNAL */ // Only bit 4 is read, by definition.
+function automatic logic is_end_of_frame_type (input logic [7:0] packet_type);
+   return packet_type[4];
+endfunction : is_end_of_frame_type
+/* verilator lint_on UNUSEDSIGNAL */
+
+// End of burst: an EOBB type, or the end of the frame.
+function automatic logic is_end_of_burst_type (input logic [7:0] packet_type);
+   return (packet_type == INT16_COMPLEX_EOBB) ||
+          (packet_type == INT16_COMPLEX_EXTENDED2_EOBB) ||
+          is_end_of_frame_type(packet_type);
+endfunction : is_end_of_burst_type
+
+// Bytes before the first sample: 16 normal, 24 extended, 544 extended2.
+function automatic logic [15:0] header_bytes (input logic [7:0] packet_type);
+   if (is_extended2_type(packet_type)) begin
+      return 16'd544;
+   end else if (is_extended_type(packet_type)) begin
+      return 16'd24;
+   end else begin
+      return 16'd16;
+   end
+endfunction : header_bytes
 
 
 //-------------------------------------------------------------------------------
