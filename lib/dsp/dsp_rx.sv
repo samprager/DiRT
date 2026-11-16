@@ -20,7 +20,8 @@ module dsp_rx
     parameter RX_SAMPLE_FIFO_SIZE = 12,  // Default from axis_stream_to_pkt_wrapper
     parameter RX_PACKET_FIFO_SIZE = 9,  // Default from axis_stream_to_pkt_wrapper
     parameter IQ_WIDTH = 16,  // Default from axis_stream_to_pkt_wrapper
-    parameter TIME_PER_PKT_WIDTH=16  // Default from axis_stream_to_pkt_wrapper
+    parameter TIME_PER_PKT_WIDTH = 16,  // Default from axis_stream_to_pkt_wrapper
+    parameter bit USE_ULTRA = 0  // USE ULTRA RAM for FIFO implementation
     )
    (
     input logic        clk,
@@ -42,6 +43,10 @@ module dsp_rx
     input logic        csr_rx_abort,
     // Status Flags
     output logic       csr_stream_to_pkt_idle, // Assert when state machine is idle
+    // Overflow Flags
+    input  logic       csr_overflow_clear, // Assert to clear the overflow flag
+    output logic       csr_rx_overflow,
+    
     // System Time Output
     input logic [63:0] system_time,
     // RX sample Input Bus
@@ -52,6 +57,20 @@ module dsp_rx
 
    wire [63:0] probe ; // Debug
    wire        run;
+
+   
+   // Overflow detection
+   always_ff @(posedge clk) begin
+       if (rst) begin 
+           csr_rx_overflow <= 0;
+       end else if (csr_overflow_clear) begin
+           csr_rx_overflow <= 0;
+       end else if (csr_stream_to_pkt_enable) begin
+           csr_rx_overflow <= axis_rx_sample.tvalid && ~axis_rx_sample.tready;
+       end else begin 
+           csr_rx_overflow <= 0; // clear overflow if rx is disabled
+       end
+   end
 
    //-----------------------------------------------------------------------------
    //
@@ -68,7 +87,8 @@ module dsp_rx
        .SAMPLE_FIFO_SIZE(RX_SAMPLE_FIFO_SIZE),
        .PACKET_FIFO_SIZE(RX_PACKET_FIFO_SIZE),
        .IQ_WIDTH(IQ_WIDTH),
-       .TIME_PER_PKT_WIDTH(TIME_PER_PKT_WIDTH)
+       .TIME_PER_PKT_WIDTH(TIME_PER_PKT_WIDTH),
+       .USE_ULTRA(USE_ULTRA)
        )
    axis_stream_to_pkt_backpressured_i0
      (
@@ -83,6 +103,8 @@ module dsp_rx
       .flow_id(csr_rx_flow_id),
       .time_per_pkt(csr_rx_time_per_pkt),
       .burst_size(csr_rx_burst_size),
+      .has_metadata(1'b0),
+      .rx_mimo_metadata(64'b0),
       .abort(csr_rx_abort),
       // Status Flags
       .idle(csr_stream_to_pkt_idle),
